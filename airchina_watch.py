@@ -86,28 +86,31 @@ def get_north():
     except: return None
 
 def get_news():
-    """多渠道采集新闻"""
-    import akshare as ak
+    """新浪财经新闻 - 多栏目采集"""
+    import urllib.request as ur, json, re
     items = []
 
+    # 不同栏目: 2509=全球财经, 2510=国内财经, 2512=国际财经, 2515=产经
+    for lid in [2509, 2510, 2512]:
+        try:
+            url = f'https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid={lid}&k=&num=20&page=1'
+            req = ur.Request(url, headers={'User-Agent':'Mozilla/5.0','Referer':'https://finance.sina.com.cn/'})
+            data = json.loads(ur.urlopen(req, timeout=10).read().decode())
+            for item in data.get('result',{}).get('data',[]):
+                t = item.get('title','') or item.get('intro','')
+                if t and len(t)>8 and len(t)<200: items.append(t)
+        except: pass
+
+    # 也保留东方财富作为补充
     try:
+        import akshare as ak
         df = ak.stock_news_em()
         if df is not None and not df.empty:
             cols = df.columns.tolist()
-            for tc in ["新闻标题","title","content"]:
-                if tc in cols: break
-            else: tc = cols[1]
-            for _,r in df.head(80).iterrows():
+            tc = "新闻标题" if "新闻标题" in cols else cols[1]
+            for _,r in df.head(30).iterrows():
                 t = str(r.get(tc,"")).strip()
                 if len(t)>8 and len(t)<200: items.append(t)
-    except: pass
-
-    try:
-        df = ak.stock_info_global_em()
-        if df is not None and not df.empty:
-            for _,r in df.head(30).iterrows():
-                t = str(r.get("title","") or r.get("content","")).strip()
-                if t and len(t)>8: items.append(t[:150])
     except: pass
 
     seen=set(); uniq=[]
