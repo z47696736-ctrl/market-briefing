@@ -275,32 +275,77 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         idx_html+='</div>'
     idx_html+='</div>'
 
-    # 新闻 + 影响分析
+    # 新闻 + 深度分析
+    def analyze_news(text):
+        """分析每条新闻对国航的具体影响"""
+        t = text
+        # 油价相关
+        if "油价涨" in t or "油价升" in t or "原油涨" in t:
+            return ("🔴 利空","油价上涨→航空燃油成本增加→压缩国航利润空间","#e74c3c")
+        if "油价跌" in t or "油价降" in t or "原油跌" in t:
+            return ("🟢 利好","油价下跌→燃油成本降低→国航利润率提升","#27ae60")
+        if "减产" in t and ("OPEC" in t or "欧佩克" in t or "石油" in t or "原油" in t):
+            return ("🔴 利空","产油国减产→供应收紧→油价可能上行→增加航空成本","#e74c3c")
+        if "增产" in t and ("石油" in t or "原油" in t):
+            return ("🟢 利好","产油国增产→供应增加→油价可能下行→降低航空成本","#27ae60")
+        # 美伊/中东
+        if ("制裁" in t or "冲突" in t or "紧张" in t or "升级" in t) and ("伊朗" in t or "中东" in t or "波斯湾" in t):
+            return ("🔴 利空","中东局势紧张→原油供应风险→油价上行压力→航空成本预期上升","#e74c3c")
+        if ("协议" in t or "缓和" in t or "解除" in t) and ("伊朗" in t or "中东" in t):
+            return ("🟢 利好","中东局势缓和→原油供应风险降低→油价预期稳定→成本端利好","#27ae60")
+        if "伊朗" in t or "中东" in t or "波斯湾" in t or "霍尔木兹" in t:
+            return ("🟠 关注","中东地缘政治影响原油供应→油价波动直接关系到国航燃油成本","#e67e22")
+        # 汇率
+        if "人民币升" in t or "人民币走强" in t:
+            return ("🟢 利好","人民币升值→国航以人民币计价的国际航线收入增加→利润受益","#27ae60")
+        if "人民币贬" in t or "人民币走弱" in t:
+            return ("🔴 利空","人民币贬值→国际航线收入折算缩水→以外币结算的成本上升","#e74c3c")
+        if "美联储降息" in t or "降息" in t:
+            return ("🟢 利好","降息→美元走弱→人民币相对升值→利好国航国际业务","#27ae60")
+        if "美联储加息" in t:
+            return ("🔴 利空","加息→美元走强→人民币贬值压力→利空国航国际收入","#e74c3c")
+        # 航空行业
+        if ("航班" in t or "航线" in t or "开通" in t) and ("增" in t or "恢复" in t or "新开" in t):
+            return ("🟢 利好","航线增加/恢复→国航运力扩张→收入增长预期","#27ae60")
+        if "停飞" in t or "取消航班" in t or "关闭领空" in t:
+            return ("🔴 利空","航班运营受阻→国航收入直接受损","#e74c3c")
+        if "免签" in t or "签证" in t:
+            return ("🟢 利好","签证便利→出境游增加→国际航线客流上升→利好国航","#27ae60")
+        if "旅游" in t and ("复苏" in t or "增长" in t or "热" in t or "新高" in t):
+            return ("🟢 利好","旅游市场繁荣→出行需求旺盛→机票销量增加→国航直接受益","#27ae60")
+        if "事故" in t or "坠" in t:
+            return ("🔴 利空","航空安全事故→行业信心受挫→短期内航空股承压","#e74c3c")
+        # 贸易/关税
+        if "关税" in t and ("加" in t or "升级" in t or "新增" in t):
+            return ("🔴 利空","贸易摩擦升级→影响全球经济→商务出行需求下降→不利航空","#e74c3c")
+        if "贸易" in t and ("缓和" in t or "协议" in t or "谈判" in t):
+            return ("🟢 利好","贸易关系改善→经济信心增强→商务及旅游出行增加","#27ae60")
+        # 大盘
+        if "暴涨" in t or "大涨" in t:
+            return ("🟢 利好","市场情绪高涨→资金风险偏好上升→有利于航空股估值提升","#27ae60")
+        if "暴跌" in t or "崩盘" in t or "恐慌" in t:
+            return ("🔴 利空","市场恐慌→系统性风险→航空股可能被错杀","#e74c3c")
+        if "新高" in t or "突破" in t:
+            return ("🔵 偏多","市场走强→整体氛围向好","#3498db")
+        # 国际局势
+        if "战争" in t or "冲突" in t or "威胁" in t:
+            return ("🔴 利空","地缘冲突→全球不稳定→出行意愿下降+油价风险","#e74c3c")
+        # 默认
+        if any(k in t for k in ["美国","伊朗","OPEC","石油","原油","俄罗斯","制裁","关税"]):
+            return ("🟠 关注","涉及影响国航的关键变量，需持续跟踪","#e67e22")
+        return ("","","")
     def impact_tag(text):
-        """分析新闻对国航的影响"""
-        pos_kw = ["油价跌","油价降","原油跌","增产","缓和","解除制裁","协议达成","人民币升","升值","降息","复苏","恢复","增长","利好","新增航线","增开","免签","旅游复苏","游客","出行热"]
-        neg_kw = ["油价涨","油价升","原油涨","减产","制裁","冲突","战争","紧张","升级","关闭领空","停飞","取消航班","事故","坠","人民币贬","贬值","加息","加税","关税","贸易战","衰退"]
-        for kw in pos_kw:
-            if kw in text: return ("利好","#27ae60")
-        for kw in neg_kw:
-            if kw in text: return ("利空","#e74c3c")
-        # 间接判断
-        if any(k in text for k in ["美国","伊朗","中东","石油","原油","OPEC","霍尔木兹"]):
-            return ("关注","#e67e22")
-        if any(k in text for k in ["涨","新高","反弹","突破"]):
-            return ("偏多","#3498db")
-        if any(k in text for k in ["跌","新低","崩","暴跌","恐慌"]):
-            return ("偏空","#888")
-        return ("","#888")
+        tag, detail, color = analyze_news(text)
+        return tag, detail, color
 
     news_html = ""
     for cat,items in news.items():
         if not items: continue
         news_html+=f'<div class="card"><h3>{cat}</h3>'
         for n in items[:4]:
-            tag, tc = impact_tag(n)
-            if tag:
-                news_html+=f'<div class="news-item">▸ {n} <span style="font-size:9px;background:{tc}22;color:{tc};padding:0 4px;border-radius:3px;border:1px solid {tc}44">{tag}</span></div>'
+            _, detail, tc = impact_tag(n)
+            if detail:
+                news_html+=f'<div class="news-item">▸ {n}<br><span style="font-size:10px;color:{tc};background:{tc}11;padding:1px 6px;border-radius:3px;display:inline-block;margin-top:2px">{detail}</span></div>'
             else:
                 news_html+=f'<div class="news-item">▸ {n}</div>'
         news_html+='</div>'
