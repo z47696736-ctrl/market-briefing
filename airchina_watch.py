@@ -290,8 +290,8 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         if any(k in text for k in ["涨","新高","反弹","突破"]):
             return ("偏多","#3498db")
         if any(k in text for k in ["跌","新低","崩","暴跌","恐慌"]):
-            return ("偏空","#95a5a6")
-        return ("","")
+            return ("偏空","#888")
+        return ("","#888")
 
     news_html = ""
     for cat,items in news.items():
@@ -299,8 +299,10 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         news_html+=f'<div class="card"><h3>{cat}</h3>'
         for n in items[:4]:
             tag, tc = impact_tag(n)
-            tag_html = f' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:{tc}18;color:{tc};border:1px solid {tc}33">{tag}</span>' if tag else ""
-            news_html+=f'<div class="news-item">▸ {n}{tag_html}</div>'
+            if tag:
+                news_html+=f'<div class="news-item">▸ {n} <span style="font-size:9px;background:{tc}22;color:{tc};padding:0 4px;border-radius:3px;border:1px solid {tc}44">{tag}</span></div>'
+            else:
+                news_html+=f'<div class="news-item">▸ {n}</div>'
         news_html+='</div>'
 
     ft = '<div class="footer">⚠️ 仅供参考 · 每天9:00/20:00推送<br>油价决定成本 · 汇率决定收入 · 局势决定风险</div>'
