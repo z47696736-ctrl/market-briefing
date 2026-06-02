@@ -50,9 +50,7 @@ def get_oil_fx_gold():
     # 人民币
     try: d = sina("USDCNY"); result["人民币"] = float(d[1])
     except: pass
-    # 黄金
-    try: d = sina("hf_XAU"); result["黄金"] = {"p":float(d[0]),"c":float(d[2])}
-    except: pass
+    # 黄金 - 跳过（数据不准）
     return result
 
 def get_index():
@@ -88,17 +86,30 @@ def get_north():
     except: return None
 
 def get_news():
+    """多渠道采集新闻"""
     import akshare as ak
     items = []
+
     try:
         df = ak.stock_news_em()
         if df is not None and not df.empty:
             cols = df.columns.tolist()
-            tc = next((c for c in ["新闻标题","title"] if c in cols), cols[1])
-            for _,r in df.head(60).iterrows():
+            for tc in ["新闻标题","title","content"]:
+                if tc in cols: break
+            else: tc = cols[1]
+            for _,r in df.head(80).iterrows():
                 t = str(r.get(tc,"")).strip()
-                if len(t)>8: items.append(t)
+                if len(t)>8 and len(t)<200: items.append(t)
     except: pass
+
+    try:
+        df = ak.stock_info_global_em()
+        if df is not None and not df.empty:
+            for _,r in df.head(30).iterrows():
+                t = str(r.get("title","") or r.get("content","")).strip()
+                if t and len(t)>8: items.append(t[:150])
+    except: pass
+
     seen=set(); uniq=[]
     for i in items:
         k=i[:30]
@@ -180,12 +191,15 @@ def analyze(ac, oil_fx, idx, up, down, lu, ld, north, news):
 
     return neg, pos, neu
 
-def verdict(neg, pos):
+def verdict(neg, pos, ac):
     n=len(neg); p=len(pos)
-    if n>=3: return "🔴 多条利空","#e74c3c"
-    elif n>=1: return "🟠 偏空","#e67e22"
-    elif p>=3: return "🟢 多条利好","#27ae60"
-    elif p>=1: return "🔵 偏多","#3498db"
+    # 国航自身走势权重最大
+    if ac and ac.get("pct",0) < -4: return "🔴 国航大跌","#e74c3c"
+    if ac and ac.get("pct",0) > 4: return "🟢 国航大涨","#27ae60"
+    if n>=3: return "🔴 利空叠加","#e74c3c"
+    elif n>=1: return "🟠 注意风险","#e67e22"
+    elif p>=3: return "🟢 利好共振","#27ae60"
+    elif p>=1: return "🔵 偏积极","#3498db"
     return "⚪ 中性","#95a5a6"
 
 # ====== 构建 ======
@@ -194,7 +208,7 @@ def build(ac, oil_fx, idx, up, down, lu, ld, north, news, neg, pos, neu):
     now = datetime.now(BEIJING_TZ)
     ds = now.strftime("%m/%d %H:%M")
     emoji = "🌅" if now.hour<12 else "🌙"
-    v_text, vc = verdict(neg, pos)
+    v_text, vc = verdict(neg, pos, ac)
 
     css = """*{margin:0;padding:0}
 body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#0d1117;color:#e0e0e0;padding:8px;font-size:13px}
@@ -241,9 +255,7 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         drv_html+=f'<div class="row"><span class="l">🛢️ 布伦特</span><span class="r {c}">${b["p"]} {b["c"]:+.1f}%</span></div>'
     if "人民币" in oil_fx:
         drv_html+=f'<div class="row"><span class="l">💱 人民币</span><span class="r{"" if oil_fx["人民币"]<7.2 else " up"}">{oil_fx["人民币"]:.4f}</span></div>'
-    if "黄金" in oil_fx:
-        g=oil_fx["黄金"]; c="up" if g["c"]>0 else "down"
-        drv_html+=f'<div class="row"><span class="l">🥇 黄金</span><span class="r {c}">${g["p"]:.1f} {g["c"]:+.1f}%</span></div>'
+    # 黄金数据已移除
     drv_html+='<div style="font-size:10px;color:#666;margin-top:4px">油价↗=成本↑=利空国航 | 人民币↗=国际收入↑=利好国航</div></div>'
 
     # 大盘
