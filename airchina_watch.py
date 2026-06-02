@@ -275,13 +275,32 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         idx_html+='</div>'
     idx_html+='</div>'
 
-    # 新闻
+    # 新闻 + 影响分析
+    def impact_tag(text):
+        """分析新闻对国航的影响"""
+        pos_kw = ["油价跌","油价降","原油跌","增产","缓和","解除制裁","协议达成","人民币升","升值","降息","复苏","恢复","增长","利好","新增航线","增开","免签","旅游复苏","游客","出行热"]
+        neg_kw = ["油价涨","油价升","原油涨","减产","制裁","冲突","战争","紧张","升级","关闭领空","停飞","取消航班","事故","坠","人民币贬","贬值","加息","加税","关税","贸易战","衰退"]
+        for kw in pos_kw:
+            if kw in text: return ("利好","#27ae60")
+        for kw in neg_kw:
+            if kw in text: return ("利空","#e74c3c")
+        # 间接判断
+        if any(k in text for k in ["美国","伊朗","中东","石油","原油","OPEC","霍尔木兹"]):
+            return ("关注","#e67e22")
+        if any(k in text for k in ["涨","新高","反弹","突破"]):
+            return ("偏多","#3498db")
+        if any(k in text for k in ["跌","新低","崩","暴跌","恐慌"]):
+            return ("偏空","#95a5a6")
+        return ("","")
+
     news_html = ""
     for cat,items in news.items():
         if not items: continue
         news_html+=f'<div class="card"><h3>{cat}</h3>'
         for n in items[:4]:
-            news_html+=f'<div class="news-item">▸ {n}</div>'
+            tag, tc = impact_tag(n)
+            tag_html = f' <span style="font-size:9px;padding:1px 5px;border-radius:3px;background:{tc}18;color:{tc};border:1px solid {tc}33">{tag}</span>' if tag else ""
+            news_html+=f'<div class="news-item">▸ {n}{tag_html}</div>'
         news_html+='</div>'
 
     ft = '<div class="footer">⚠️ 仅供参考 · 每天9:00/20:00推送<br>油价决定成本 · 汇率决定收入 · 局势决定风险</div>'
