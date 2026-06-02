@@ -119,21 +119,33 @@ def get_news():
         if k not in seen: seen.add(k); uniq.append(i)
     return uniq
 
+def match_word(text, keywords):
+    """精确匹配（避免'伊拉克'匹配到'伊朗'这种）"""
+    for kw in keywords:
+        if kw in text:
+            # 中文词边界检查：前后必须是标点/空格/开头结尾
+            idx = text.find(kw)
+            before_ok = idx==0 or text[idx-1] in '，。！？；：、（）【】《》""'' \t\n,.:;!?()[]{}'
+            after_ok = idx+len(kw)==len(text) or text[idx+len(kw)] in '，。！？；：、（）【】《》""'' \t\n,.:;!?()[]{}'
+            if before_ok and after_ok:
+                return True
+    return False
+
 def filter_for_airchina(all_news):
-    """只保留对国航有影响的新闻 - 全维度覆盖"""
-    direct = ["国航","601111","航空","机票","民航","航班","机场","波音","空客","东航","南航","海航","春秋","吉祥","廉价航空","飞行员","空乘","燃油","航油","旅游","出行","酒店","免签","签证","国际航线","国内航线","暑运","春运","国庆","五一","候机楼","跑道","空管","流量","准点率"]
-    oil = ["原油","油价","OPEC","欧佩克","石油","钻井","产油","减产","EIA","库存","能源","天然气","煤炭","燃油","航油","制裁","伊朗","中东","波斯湾","以色列","霍尔木兹","沙特","也门","胡塞","叙利亚","伊拉克","科威特","阿联酋"]
-    fx_trade = ["人民币","汇率","关税","中美","贸易战","贸易摩擦","出口","进口","WTO","谈判","脱钩","加税","反制","清单","301","调查","贸易逆差","贸易顺差","出海"]
-    macro = ["央行","美联储","降息","降准","加息","利率","CPI","通胀","GDP","PMI","LPR","MLF","逆回购","政策","政治局","国常会","国务院","发改委","货币","财政","国债","地方债","社融","M2","信贷","消费"]
-    market = ["A股","大盘","暴涨","暴跌","跌停潮","涨停潮","北向","万亿","放量","缩量","恐慌","新高","新低","3000","4000","熔断","翻红","翻绿","跳水","拉升","V型","深V","尾盘","午后","涨停","跌停","板块","赛道","龙头"]
-    global_ = ["美股","纳指","道指","标普","科技股","特斯拉","英伟达","苹果","微软","Meta","亚马逊","谷歌","俄罗斯","乌克兰","朝鲜","韩国","日本","印度","欧洲","欧盟","北约","特朗普","拜登","大选","白宫","国会","五角大楼","台海","南海","菲律宾"]
-    travel = ["旅游","景区","携程","同程","美团","酒店","民宿","消费","出境游","入境游","国内游","周边游","自由行","跟团游","邮轮","火车票","高铁"]
+    """只保留对国航有影响的新闻 - 精确匹配"""
+    direct = ["国航","601111","航空","机票","民航","航班","机场","波音","空客","东航","南航","海航","春秋航空","吉祥航空","飞行员","空乘","航油","免签","签证","国际航线","候机楼","空管","准点率"]
+    oil = ["原油","油价","OPEC","欧佩克","石油","减产","制裁 伊朗","波斯湾","以色列","霍尔木兹","沙特","胡塞","也门"]
+    fx_trade = ["人民币","汇率","关税","中美","贸易战","贸易摩擦","脱钩","加税","301调查","贸易逆差"]
+    macro = ["央行","美联储","降息","降准","加息","利率","CPI","通胀","GDP","PMI","LPR","政治局","国常会","国务院","发改委","社融","M2","人民币"]
+    market = ["A股","大盘","暴涨","暴跌","跌停潮","涨停潮","北向","万亿","恐慌","新高","新低","熔断","翻红","翻绿","跳水","拉升","深V"]
+    global_ = ["美股","纳指","道指","标普","特斯拉","英伟达","俄罗斯","乌克兰","朝鲜","台海","南海","北约","特朗普","大选","五角大楼"]
+    travel = ["出境游","入境游","免签","签证","旅游复苏","旅游增长","出行热","暑运","春运"]
 
     cats = {
         "✈️ 航空旅游": direct + travel,
         "🛢️ 原油能源": oil,
         "💱 汇率贸易": fx_trade,
-        "🏛️ 国内政策": macro,
+        "🏛️ 宏观政策": macro,
         "📊 A股异动": market,
         "🌍 国际局势": global_,
     }
@@ -142,7 +154,12 @@ def filter_for_airchina(all_news):
         m=[]
         for n in all_news:
             if id(n) in used: continue
+            # 精确匹配
             if any(k in n for k in kws):
+                # 额外过滤：排除明显无关的
+                skip_words = ["足球","球员","大名单","世界杯","联赛","欧冠","NBA","演唱会","综艺","明星","八卦","游戏"]
+                if any(s in n for s in skip_words):
+                    continue
                 m.append(n); used.add(id(n))
                 if len(m)>=4: break
         if m: result[cat]=m
@@ -196,13 +213,16 @@ def analyze(ac, oil_fx, idx, up, down, lu, ld, north, news):
 
 def verdict(neg, pos, ac):
     n=len(neg); p=len(pos)
+    ac_pct = ac.get("pct",0) if ac else 0
     # 国航自身走势权重最大
-    if ac and ac.get("pct",0) < -4: return "🔴 国航大跌","#e74c3c"
-    if ac and ac.get("pct",0) > 4: return "🟢 国航大涨","#27ae60"
+    if ac_pct < -3: return f"🔴 国航跌{abs(ac_pct)}%","#e74c3c"
+    if ac_pct < -1: return f"🟠 国航走弱","#e67e22"
+    if ac_pct > 3: return f"🟢 国航涨{ac_pct}%","#27ae60"
+    if ac_pct > 1: return f"🔵 国航走强","#3498db"
     if n>=3: return "🔴 利空叠加","#e74c3c"
-    elif n>=1: return "🟠 注意风险","#e67e22"
-    elif p>=3: return "🟢 利好共振","#27ae60"
-    elif p>=1: return "🔵 偏积极","#3498db"
+    if n>=1: return "🟠 注意风险","#e67e22"
+    if p>=3: return "🟢 利好共振","#27ae60"
+    if p>=1: return "🔵 偏积极","#3498db"
     return "⚪ 中性","#95a5a6"
 
 # ====== 构建 ======
@@ -316,9 +336,9 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         if "事故" in t or "坠" in t:
             return ("🔴 利空","航空安全事故→行业信心受挫→短期内航空股承压","#e74c3c")
         # 贸易/关税
-        if "关税" in t and ("加" in t or "升级" in t or "新增" in t):
+        if ("关税" in t or "贸易" in t) and ("加" in t or "升级" in t or "新增" in t or "提出对" in t) and not ("续期" in t or "延长" in t or "缓和" in t or "协议" in t):
             return ("🔴 利空","贸易摩擦升级→影响全球经济→商务出行需求下降→不利航空","#e74c3c")
-        if "贸易" in t and ("缓和" in t or "协议" in t or "谈判" in t):
+        if ("关税" in t or "贸易" in t) and ("缓和" in t or "协议" in t or "谈判" in t or "续期" in t or "延长" in t or "解除" in t):
             return ("🟢 利好","贸易关系改善→经济信心增强→商务及旅游出行增加","#27ae60")
         # 大盘
         if "暴涨" in t or "大涨" in t:
@@ -330,8 +350,10 @@ body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;backgr
         # 国际局势
         if "战争" in t or "冲突" in t or "威胁" in t:
             return ("🔴 利空","地缘冲突→全球不稳定→出行意愿下降+油价风险","#e74c3c")
-        # 默认
-        if any(k in t for k in ["美国","伊朗","OPEC","石油","原油","俄罗斯","制裁","关税"]):
+        # 默认 - 只对真正相关的留tag
+        if any(k in t for k in ["特朗普","关 税","人民币","汇率"]):
+            if "行政令" in t or "AI" in t or "税务" in t: return ("","","")
+        if any(k in t for k in ["美伊","美 伊","伊朗 制裁","中东 局势","霍尔木兹","原油 供应","OPEC 减产","人民币 汇","关税 加"]):
             return ("🟠 关注","涉及影响国航的关键变量，需持续跟踪","#e67e22")
         return ("","","")
     def impact_tag(text):
