@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""国航盯盘 - 一切围绕601111"""
+"""国航盯盘 - 每天9:00/20:00推送"""
 from datetime import datetime, timezone, timedelta
 import json, os, urllib.request
 
@@ -21,377 +21,238 @@ def push(title, content):
         print("📲 已推送" if resp.get("code")==200 else f"失败:{resp.get('msg')}")
     except Exception as e: print(f"异常:{e}")
 
-def sina(symbol):
+def sina(s):
     import urllib.request as ur
-    req = ur.Request(f"https://hq.sinajs.cn/list={symbol}",headers={"Referer":"https://finance.sina.com.cn"})
+    req = ur.Request(f"https://hq.sinajs.cn/list={s}",headers={"Referer":"https://finance.sina.com.cn"})
     return ur.urlopen(req,timeout=10).read().decode("gbk").split('"')[1].split(",")
 
 # ====== 数据 ======
 
 def get_airchina():
-    """只有国航"""
     try:
         d = sina("sh601111"); p = float(d[3]); pv = float(d[2])
-        high = float(d[4]); low = float(d[5]); vol = int(d[8]); amt = round(float(d[9])/10000,0)
-        return {"price":p,"prev":pv,"pct":round((p-pv)/pv*100,2),"high":high,"low":low,"vol":vol,"amt":amt}
+        return {"price":p,"prev":pv,"pct":round((p-pv)/pv*100,2),"high":float(d[4]),"low":float(d[5]),"amt":round(float(d[9])/10000,0)}
     except: return None
 
-def get_oil_fx_gold():
-    """国航的命门：油价和汇率"""
-    result = {}
-    # 原油
+def get_oil_fx():
+    r = {}
     import akshare as ak
-    for s,n in [("CL","WTI原油"),("B","布伦特原油")]:
+    for s,n in [("CL","WTI"),("B","布伦特")]:
         try:
             df = ak.futures_foreign_hist(symbol=s)
             l,p = df.iloc[-1],df.iloc[-2]
-            result[n] = {"p":round(l["close"],2),"c":round((l["close"]-p["close"])/p["close"]*100,2)}
+            r[n] = {"p":round(l["close"],2),"c":round((l["close"]-p["close"])/p["close"]*100,2)}
         except: pass
-    # 人民币
-    try: d = sina("USDCNY"); result["人民币"] = float(d[1])
+    try: r["人民币"] = float(sina("USDCNY")[1])
     except: pass
-    # 黄金 - 跳过（数据不准）
-    return result
+    return r
 
 def get_index():
     import akshare as ak
     idx = {}
-    for c,n in [("sh000001","上证指数"),("sz399001","深证成指"),("sz399006","创业板指")]:
+    for c,n in [("sh000001","上证"),("sz399001","深证"),("sz399006","创业板")]:
         try:
             df = ak.stock_zh_index_daily(symbol=c)
             l = df.iloc[-1]
             idx[n] = {"p":round(l["close"],2),"c":round((l["close"]-l["open"])/l["open"]*100,2)}
         except: pass
-    for code,name in [("hkHSI","恒生指数"),(".DJI","道琼斯"),(".IXIC","纳斯达克")]:
+    for code,name in [("hkHSI","恒生"),(".DJI","道琼斯"),(".IXIC","纳斯达克")]:
         try:
             d = sina(code)
             idx[name] = {"p":round(float(d[1]),2),"c":round(float(d[3] if code.startswith("hk") else d[2]),2)}
         except: pass
     return idx
 
-def get_breadth():
-    import akshare as ak
-    try:
-        df = ak.stock_zh_a_spot_em()
-        up = len(df[df["涨跌幅"]>0]); down = len(df[df["涨跌幅"]<0])
-        limit_up = len(df[df["涨跌幅"]>=9.9]); limit_down = len(df[df["涨跌幅"]<=-9.9])
-        return up, down, limit_up, limit_down
-    except: return 0,0,0,0
-
-def get_north():
-    import akshare as ak
-    try:
-        df = ak.stock_hsgt_north_net_flow_in_em(symbol="北上")
-        return round(float(df.iloc[-1].get("value",0))/100000000,2)
-    except: return None
-
 def get_news():
-    """新浪财经新闻 - 多栏目采集"""
-    import urllib.request as ur, json, re
+    """新浪财经 - 只取最新"""
+    import urllib.request as ur, json as j, time
     items = []
-
-    # 不同栏目: 2509=全球财经, 2510=国内财经, 2512=国际财经, 2515=产经
-    for lid in [2509, 2510, 2512]:
+    now = time.time()
+    for lid in [2509,2510,2512]:
         try:
             url = f'https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid={lid}&k=&num=20&page=1'
-            req = ur.Request(url, headers={'User-Agent':'Mozilla/5.0','Referer':'https://finance.sina.com.cn/'})
-            data = json.loads(ur.urlopen(req, timeout=10).read().decode())
+            req = ur.Request(url,headers={'User-Agent':'Mozilla/5.0','Referer':'https://finance.sina.com.cn/'})
+            data = j.loads(ur.urlopen(req,timeout=10).read().decode())
             for item in data.get('result',{}).get('data',[]):
+                ctime = int(item.get('ctime',0))
+                if now - ctime > 86400: continue  # 只要24小时内
                 t = item.get('title','') or item.get('intro','')
-                if t and len(t)>8 and len(t)<200: items.append(t)
+                if t and 10<len(t)<200: items.append(t)
         except: pass
-
-    # 也保留东方财富作为补充
-    try:
-        import akshare as ak
-        df = ak.stock_news_em()
-        if df is not None and not df.empty:
-            cols = df.columns.tolist()
-            tc = "新闻标题" if "新闻标题" in cols else cols[1]
-            for _,r in df.head(30).iterrows():
-                t = str(r.get(tc,"")).strip()
-                if len(t)>8 and len(t)<200: items.append(t)
-    except: pass
-
     seen=set(); uniq=[]
     for i in items:
-        k=i[:30]
+        k=i[:40]
         if k not in seen: seen.add(k); uniq.append(i)
     return uniq
 
-def match_word(text, keywords):
-    """精确匹配（避免'伊拉克'匹配到'伊朗'这种）"""
-    for kw in keywords:
-        if kw in text:
-            # 中文词边界检查：前后必须是标点/空格/开头结尾
-            idx = text.find(kw)
-            before_ok = idx==0 or text[idx-1] in '，。！？；：、（）【】《》""'' \t\n,.:;!?()[]{}'
-            after_ok = idx+len(kw)==len(text) or text[idx+len(kw)] in '，。！？；：、（）【】《》""'' \t\n,.:;!?()[]{}'
-            if before_ok and after_ok:
-                return True
-    return False
-
-def filter_for_airchina(all_news):
-    """只保留对国航有影响的新闻 - 精确匹配"""
-    direct = ["国航","601111","航空","机票","民航","航班","机场","波音","空客","东航","南航","海航","春秋航空","吉祥航空","飞行员","空乘","航油","免签","签证","国际航线","候机楼","空管","准点率"]
-    oil = ["原油","油价","OPEC","欧佩克","石油","减产","制裁 伊朗","波斯湾","以色列","霍尔木兹","沙特","胡塞","也门"]
-    fx_trade = ["人民币","汇率","关税","中美","贸易战","贸易摩擦","脱钩","加税","301调查","贸易逆差"]
-    macro = ["央行","美联储","降息","降准","加息","利率","CPI","通胀","GDP","PMI","LPR","政治局","国常会","国务院","发改委","社融","M2","人民币"]
-    market = ["A股","大盘","暴涨","暴跌","跌停潮","涨停潮","北向","万亿","恐慌","新高","新低","熔断","翻红","翻绿","跳水","拉升","深V"]
-    global_ = ["美股","纳指","道指","标普","特斯拉","英伟达","俄罗斯","乌克兰","朝鲜","台海","南海","北约","特朗普","大选","五角大楼"]
-    travel = ["出境游","入境游","免签","签证","旅游复苏","旅游增长","出行热","暑运","春运"]
-
+def classify(news_list):
+    """分类 + 只保留相关新闻"""
     cats = {
-        "✈️ 航空旅游": direct + travel,
-        "🛢️ 原油能源": oil,
-        "💱 汇率贸易": fx_trade,
-        "🏛️ 宏观政策": macro,
-        "📊 A股异动": market,
-        "🌍 国际局势": global_,
+        "✈️ 航空出行": ["国航","航空","机票","航班","机场","波音","空客","免签","签证","出境游","入境游","旅游","航线","东航","南航"],
+        "🛢️ 原油能源": ["原油","油价","OPEC","石油","减产","产油","能源","燃油"],
+        "🔥 中东局势": ["伊朗","中东","波斯湾","以色列","沙特","霍尔木兹","也门","胡塞"],
+        "💱 汇率贸易": ["人民币","汇率","关税","贸易战","中美","脱钩","制裁"],
+        "🏛️ 宏观政策": ["美联储","央行","降息","降准","加息","利率","CPI","通胀","GDP","PMI","政治局","国常会","LPR"],
+        "📊 市场动态": ["A股","大盘","暴涨","暴跌","北向","新高","新低","恐慌","美股","纳指","道指","标普"],
+        "🌍 国际政治": ["特朗普","拜登","大选","白宫","北约","乌克兰","俄罗斯","台海","南海","朝鲜"],
     }
-    result = {}; used=set()
+    result = {}; used = set()
+    skip = ["足球","球员","大名单","世界杯","联赛","NBA","演唱会","综艺","八卦","游戏","AI","芯片","SpaceX","IPO","记者协会"]
     for cat,kws in cats.items():
-        m=[]
-        for n in all_news:
+        m = []
+        for n in news_list:
             if id(n) in used: continue
-            # 精确匹配
+            if any(s in n for s in skip): continue
             if any(k in n for k in kws):
-                # 额外过滤：排除明显无关的
-                skip_words = ["足球","球员","大名单","世界杯","联赛","欧冠","NBA","演唱会","综艺","明星","八卦","游戏"]
-                if any(s in n for s in skip_words):
-                    continue
                 m.append(n); used.add(id(n))
-                if len(m)>=4: break
-        if m: result[cat]=m
+                if len(m) >= 4: break
+        if m: result[cat] = m
     return result
 
-# ====== 分析 ======
+def analyze_one(text):
+    """单条新闻影响分析"""
+    t = text
+    # 按优先级从高到低
+    tests = [
+        (lambda: ("🔴 利空","油价上涨→航空燃油成本↑→压缩利润","#e74c3c"), lambda: ("油价涨"in t or "油价升"in t or "原油涨"in t) and "跌" not in t),
+        (lambda: ("🟢 利好","油价下跌→燃油成本↓→利润率提升","#27ae60"), lambda: "油价跌"in t or "油价降"in t or "原油跌"in t),
+        (lambda: ("🔴 利空","中东局势紧张→原油供应风险→油价上行→航空成本↑","#e74c3c"), lambda: ("伊朗"in t or "中东"in t) and ("冲突"in t or "紧张"in t or "升级"in t or "制裁"in t)),
+        (lambda: ("🟢 利好","美伊关系缓和→原油供应风险↓→成本端利好","#27ae60"), lambda: ("伊朗"in t or "美伊"in t) and ("缓和"in t or "协议"in t or "对话"in t or "谈判"in t)),
+        (lambda: ("🟢 利好","人民币升值→国际航线收入↑","#27ae60"), lambda: "人民币升"in t or "人民币走强"in t),
+        (lambda: ("🔴 利空","人民币贬值→国际收入缩水→成本↑","#e74c3c"), lambda: "人民币贬"in t or "人民币走弱"in t),
+        (lambda: ("🟢 利好","美联储降息→美元走弱→人民币相对升值","#27ae60"), lambda: ("降息"in t or "美联储"in t+"降"in t) and "英"not in t and "欧"not in t),
+        (lambda: ("🔴 利空","加息→美元走强→人民币贬值压力","#e74c3c"), lambda: "加息"in t and "英"not in t and "欧"not in t),
+        (lambda: ("🟢 利好","免签/签证便利→出境游↑→国际航线客流↑","#27ae60"), lambda: "免签"in t or ("签证"in t and "便利"in t)),
+        (lambda: ("🟢 利好","航线增加→国航运力扩张→收入预期↑","#27ae60"), lambda: ("航线"in t or "航班"in t) and ("增"in t or "恢复"in t or "新开"in t)),
+        (lambda: ("🔴 利空","航班运营受阻→国航收入直接受损","#e74c3c"), lambda: "停飞"in t or "取消航班"in t or "关闭领空"in t),
+        (lambda: ("🟢 利好","贸易缓和→经济信心↑→出行需求↑","#27ae60"), lambda: ("关税"in t or "贸易"in t) and ("缓和"in t or "续期"in t or "协议"in t or "延长"in t)),
+        (lambda: ("🔴 利空","贸易摩擦升级→全球经济承压→商务出行↓","#e74c3c"), lambda: ("关税"in t or "贸易"in t) and ("加"in t or "升级"in t or "新增"in t)),
+        (lambda: ("🟢 利好","市场高涨→风险偏好↑→航空股估值提升","#27ae60"), lambda: "暴涨"in t or "大涨"in t or "创新高"in t),
+        (lambda: ("🔴 利空","市场恐慌→系统性风险→航空股被错杀","#e74c3c"), lambda: "暴跌"in t or "崩盘"in t or "恐慌"in t),
+        (lambda: ("🔴 利空","地缘冲突→不稳定→出行↓+油价风险","#e74c3c"), lambda: "战争"in t or "军事冲突"in t),
+        (lambda: ("🟠 关注","涉及影响国航核心变量，需持续跟踪","#e67e22"), lambda: "特朗普"in t and ("伊朗"in t or "关税"in t or "制裁"in t or "贸易"in t)),
+    ]
+    for result_fn, condition_fn in tests:
+        if condition_fn():
+            return result_fn()
+    return ("","","")
 
-def analyze(ac, oil_fx, idx, up, down, lu, ld, north, news):
+def analyze(ac, oil, idx, news):
     neg, pos, neu = [], [], []
-
-    # 国航自身
     if ac:
-        if ac["pct"] > 5: pos.append("国航今日大涨")
-        elif ac["pct"] < -5: neg.append("国航今日大跌")
-        if ac["pct"] > 2.5: pos.append(f"国航+{ac['pct']}%跑赢大盘")
-        elif ac["pct"] < -2.5: neg.append(f"国航{ac['pct']}%跑输大盘")
-    # 油价
-    wti = oil_fx.get("WTI原油",{}).get("c",0)
-    brent = oil_fx.get("布伦特原油",{}).get("c",0)
-    avg_oil = (wti+brent)/2 if brent else wti
-    if avg_oil > 3: neg.append(f"油价涨{avg_oil:.1f}%→燃油成本↑")
-    elif avg_oil < -3: pos.append(f"油价跌{abs(avg_oil):.1f}%→燃油成本↓")
-    elif avg_oil > 1: neu.append(f"油价微涨{avg_oil:.1f}%")
-    elif avg_oil < -1: neu.append(f"油价微跌{abs(avg_oil):.1f}%")
-    # 人民币
-    cny = oil_fx.get("人民币",7.2)
-    if cny > 7.3: neg.append(f"人民币{cny}贬值→国际收入↓")
-    elif cny < 7.0: pos.append(f"人民币{cny}升值→国际收入↑")
-    # 行情
-    if up>0 and down>0 and up/down>5: pos.append("个股普涨情绪好")
-    elif down>0 and up>0 and down/up>5: neg.append("个股普跌恐慌中")
-    if lu>100: pos.append(f"{lu}只涨停赚钱效应强")
-    if ld>50: neg.append(f"{ld}只跌停风险高")
-    # 北向
-    if north is not None:
-        if north>80: pos.append(f"北向+{north}亿大幅流入")
-        elif north<-80: neg.append(f"北向{north}亿大幅流出")
-    # 大盘
-    sh = idx.get("上证指数",{}).get("c",0)
-    if sh>3: pos.append("上证暴涨市场强势")
-    elif sh<-3: neg.append("上证暴跌系统性风险")
-
-    # 新闻中的信号
-    all_t = " ".join([t for v in news.values() for t in v])
-    bad = sum(1 for w in ["冲突","战争","制裁","暴跌","崩盘","恐慌","升级","危机","暂停","取消","停飞"] if w in all_t)
-    good = sum(1 for w in ["增长","利好","复苏","新高","突破","回暖","反弹","放量","增开","恢复"] if w in all_t)
-    if bad>good+3: neg.append("负面消息明显偏多")
-    if good>bad+3: pos.append("积极信号明显偏多")
-
+        p = ac["pct"]
+        if p < -5: neg.append(f"国航大跌{abs(p)}%")
+        elif p < -3: neg.append(f"国航跌{abs(p)}%")
+        elif p > 5: pos.append(f"国航大涨{p}%")
+        elif p > 3: pos.append(f"国航涨{p}%")
+    wti = oil.get("WTI",{}).get("c",0)
+    if wti > 3: neg.append(f"WTI涨{wti:.1f}%→成本↑")
+    elif wti < -3: pos.append(f"WTI跌{abs(wti):.1f}%→成本↓")
+    elif wti > 1: neu.append(f"油价微涨{wti:.1f}%")
+    elif wti < -1: neu.append(f"油价微跌{abs(wti):.1f}%")
+    cny = oil.get("人民币",7.2)
+    if cny > 7.3: neg.append(f"人民币{cny}→收入↓")
+    elif cny < 7.0: pos.append(f"人民币{cny}→收入↑")
     return neg, pos, neu
 
 def verdict(neg, pos, ac):
-    n=len(neg); p=len(pos)
-    ac_pct = ac.get("pct",0) if ac else 0
-    # 国航自身走势权重最大
-    if ac_pct < -3: return f"🔴 国航跌{abs(ac_pct)}%","#e74c3c"
-    if ac_pct < -1: return f"🟠 国航走弱","#e67e22"
-    if ac_pct > 3: return f"🟢 国航涨{ac_pct}%","#27ae60"
-    if ac_pct > 1: return f"🔵 国航走强","#3498db"
-    if n>=3: return "🔴 利空叠加","#e74c3c"
-    if n>=1: return "🟠 注意风险","#e67e22"
-    if p>=3: return "🟢 利好共振","#27ae60"
-    if p>=1: return "🔵 偏积极","#3498db"
+    n, p = len(neg), len(pos)
+    acp = ac.get("pct",0) if ac else 0
+    if acp <= -3: return f"🔴 国航跌{abs(acp)}%","#e74c3c"
+    if acp <= -1: return "🟠 国航走弱","#e67e22"
+    if acp >= 3: return f"🟢 国航涨{acp}%","#27ae60"
+    if acp >= 1: return "🔵 国航走强","#3498db"
+    if n >= 3: return "🔴 利空叠加","#e74c3c"
+    if n >= 1: return "🟠 注意风险","#e67e22"
+    if p >= 3: return "🟢 利好共振","#27ae60"
+    if p >= 1: return "🔵 偏积极","#3498db"
     return "⚪ 中性","#95a5a6"
 
-# ====== 构建 ======
-
-def build(ac, oil_fx, idx, up, down, lu, ld, north, news, neg, pos, neu):
-    now = datetime.now(BEIJING_TZ)
-    ds = now.strftime("%m/%d %H:%M")
-    emoji = "🌅" if now.hour<12 else "🌙"
+# ====== 构建推送 ======
+def build(ac, oil, idx, news, neg, pos, neu):
+    now = datetime.now(BEIJING_TZ); ds = now.strftime("%m/%d %H:%M")
+    emoji = "🌅" if now.hour < 12 else "🌙"
     v_text, vc = verdict(neg, pos, ac)
 
-    css = """*{margin:0;padding:0}
-body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#0d1117;color:#e0e0e0;padding:8px;font-size:13px}
-.header{text-align:center;padding:12px;background:linear-gradient(180deg,#1a1f2e,#161b22);border-radius:12px;margin-bottom:8px}
-.header h1{font-size:16px;color:#f0f6fc}.header .time{font-size:10px;color:#8b949e}
-.ac-card{background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:12px;padding:14px;margin-bottom:8px;text-align:center;border:2px solid #21262d}
-.ac-card .name{font-size:13px;color:#8b949e}.ac-card .price{font-size:28px;font-weight:800;margin:4px 0}.ac-card .change{font-size:14px;font-weight:600}
-.ac-card .detail{display:flex;justify-content:center;gap:16px;margin-top:6px;font-size:11px;color:#8b949e}
-.up{color:#e74c3c}.down{color:#27ae60}.flat{color:#8b949e}
-.verdict{text-align:center;padding:8px;margin-bottom:6px;border-radius:8px;font-size:13px;font-weight:700}
-.verdict .reasons{font-size:10px;margin-top:4px;font-weight:400;opacity:0.85}
-.card{background:#161b22;border-radius:8px;padding:10px;margin-bottom:6px;border:1px solid #21262d}
-.card h3{font-size:12px;color:#f0f6fc;margin-bottom:6px}
-.row{display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px}
+    css = """*{margin:0;padding:0}body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#0d1117;color:#e0e0e0;padding:8px;font-size:13px}
+.hd{text-align:center;padding:10px;background:linear-gradient(180deg,#1a1f2e,#161b22);border-radius:10px;margin-bottom:6px}
+.hd h1{font-size:15px;color:#f0f6fc}.hd .t{font-size:10px;color:#666}
+.ac{background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:10px;padding:12px;margin-bottom:6px;text-align:center;border:2px solid #21262d}
+.ac .n{font-size:12px;color:#8b949e}.ac .p{font-size:26px;font-weight:800;margin:2px 0}.ac .c{font-size:13px;font-weight:600}
+.ac .d{display:flex;justify-content:center;gap:14px;margin-top:4px;font-size:10px;color:#666}
+.up{color:#e94560}.down{color:#0f9}
+.ve{text-align:center;padding:8px;margin-bottom:6px;border-radius:8px;font-size:13px;font-weight:700}
+.ve .rs{font-size:10px;margin-top:3px;font-weight:400;opacity:.85}
+.card{background:#161b22;border-radius:8px;padding:10px;margin-bottom:5px;border:1px solid #21262d}
+.card h3{font-size:12px;color:#f0f6fc;margin-bottom:5px}
+.row{display:flex;justify-content:space-between;align-items:center;padding:2px 0;font-size:12px}
 .row .l{color:#8b949e}.row .r{text-align:right;font-weight:600}
-.news-item{font-size:11px;padding:3px 0;border-bottom:1px solid #21262d33;line-height:1.5;color:#b0b0c0}
-.news-item:last-child{border-bottom:none}
-.footer{text-align:center;font-size:10px;color:#484f58;padding:10px}"""
+.news{font-size:11px;padding:3px 0;border-bottom:1px solid #21262d33;line-height:1.5;color:#b0b0c0}
+.news:last-child{border-bottom:none}
+.tag{font-size:9px;padding:1px 5px;border-radius:3px;margin-top:2px;display:inline-block}
+.ft{text-align:center;font-size:10px;color:#484f58;padding:10px}"""
 
-    # 头部
-    hdr = f'<div class="header"><h1>✈️ 国航盯盘</h1><div class="time">{ds} 北京时间 · 腾讯云自动运行</div></div>'
+    hdr = f'<div class="hd"><h1>✈️ 国航盯盘</h1><div class="t">{ds} 北京 · 每天9:00/20:00自动推送</div></div>'
 
-    # 国航大卡片
     ac_html = ""
     if ac:
-        c = "up" if ac["pct"]>0 else ("down" if ac["pct"]<0 else "flat")
-        arrow = "↑" if ac["pct"]>0 else ("↓" if ac["pct"]<0 else "→")
-        ac_html = f'<div class="ac-card"><div class="name">中国国航 601111</div><div class="price {c}">{ac["price"]}</div><div class="change {c}">{ac["pct"]:+.2f}% {arrow}</div><div class="detail"><span>最高 {ac["high"]}</span><span>最低 {ac["low"]}</span><span>成交 {ac["amt"]:.0f}万</span></div></div>'
+        c = "up" if ac["pct"]>0 else "down"
+        arrow = "↑" if ac["pct"]>0 else "↓"
+        ac_html = f'<div class="ac"><div class="n">中国国航 601111</div><div class="p {c}">{ac["price"]}</div><div class="c {c}">{ac["pct"]:+.2f}% {arrow}</div><div class="d"><span>最高{ac["high"]}</span><span>最低{ac["low"]}</span><span>成交{ac["amt"]:.0f}万</span></div></div>'
 
-    # 判断
-    reasons = ""
-    for f in neg: reasons += f"⚠️{f} "
-    for f in pos: reasons += f"✅{f} "
-    for f in neu: reasons += f"➖{f} "
-    v_html = f'<div class="verdict" style="background:{vc}15;border:1px solid {vc}33"><span style="color:{vc}">{v_text}</span><div class="reasons">{reasons}</div></div>' if reasons else ""
+    reasons = " ".join([f"⚠️{f}" for f in neg] + [f"✅{f}" for f in pos] + [f"➖{f}" for f in neu])
+    v_html = f'<div class="ve" style="background:{vc}15;border:1px solid {vc}33"><span style="color:{vc}">{v_text}</span><div class="rs">{reasons}</div></div>' if reasons else ""
 
-    # 核心驱动
-    drv_html = '<div class="card"><h3>⚡ 国航的命门</h3>'
-    if "WTI原油" in oil_fx:
-        w=oil_fx["WTI原油"]; c="up" if w["c"]>0 else "down"
-        drv_html+=f'<div class="row"><span class="l">🛢️ WTI原油</span><span class="r {c}">${w["p"]} {w["c"]:+.1f}%</span></div>'
-    if "布伦特原油" in oil_fx:
-        b=oil_fx["布伦特原油"]; c="up" if b["c"]>0 else "down"
-        drv_html+=f'<div class="row"><span class="l">🛢️ 布伦特</span><span class="r {c}">${b["p"]} {b["c"]:+.1f}%</span></div>'
-    if "人民币" in oil_fx:
-        drv_html+=f'<div class="row"><span class="l">💱 人民币</span><span class="r{"" if oil_fx["人民币"]<7.2 else " up"}">{oil_fx["人民币"]:.4f}</span></div>'
-    # 黄金数据已移除
-    drv_html+='<div style="font-size:10px;color:#666;margin-top:4px">油价↗=成本↑=利空国航 | 人民币↗=国际收入↑=利好国航</div></div>'
+    drv = '<div class="card"><h3>⚡ 关键指标  <span style="font-size:10px;color:#e94560">油价↗利空 | 人民币↗利好</span></h3>'
+    if "WTI" in oil:
+        w=oil["WTI"]; c="up" if w["c"]>0 else "down"
+        drv += f'<div class="row"><span class="l">🛢️ WTI原油</span><span class="r {c}">${w["p"]} {w["c"]:+.1f}%</span></div>'
+    if "布伦特" in oil:
+        b=oil["布伦特"]; c="up" if b["c"]>0 else "down"
+        drv += f'<div class="row"><span class="l">🛢️ 布伦特</span><span class="r {c}">${b["p"]} {b["c"]:+.1f}%</span></div>'
+    if "人民币" in oil:
+        drv += f'<div class="row"><span class="l">💱 人民币</span><span class="r">{oil["人民币"]:.4f}</span></div>'
+    drv += '</div>'
 
-    # 大盘
-    idx_html = '<div class="card"><h3>📈 大盘风向</h3>'
-    for n in ["上证指数","深证成指","创业板指","恒生指数","道琼斯","纳斯达克"]:
+    idx_h = '<div class="card"><h3>📈 大盘风向</h3>'
+    for n in ["上证","深证","创业板","恒生","道琼斯","纳斯达克"]:
         i=idx.get(n)
         if i:
             c="up" if i["c"]>0 else "down"
-            idx_html+=f'<div class="row"><span class="l">{n}</span><span class="r {c}">{i["p"]:.0f} {i["c"]:+.2f}%</span></div>'
-    # 市场温度
-    if up+down>0:
-        idx_html+=f'<div style="margin-top:4px;font-size:10px;color:#666">涨{up}家 跌{down}家 涨停{lu} 跌停{ld}'
-        if north is not None: idx_html+=f' | 北向{north:+.0f}亿'
-        idx_html+='</div>'
-    idx_html+='</div>'
+            idx_h+=f'<div class="row"><span class="l">{n}</span><span class="r {c}">{i["p"]:.0f} {i["c"]:+.2f}%</span></div>'
+    idx_h += '</div>'
 
-    # 新闻 + 深度分析
-    def analyze_news(text):
-        """分析每条新闻对国航的具体影响"""
-        t = text
-        # 油价相关
-        if "油价涨" in t or "油价升" in t or "原油涨" in t:
-            return ("🔴 利空","油价上涨→航空燃油成本增加→压缩国航利润空间","#e74c3c")
-        if "油价跌" in t or "油价降" in t or "原油跌" in t:
-            return ("🟢 利好","油价下跌→燃油成本降低→国航利润率提升","#27ae60")
-        if "减产" in t and ("OPEC" in t or "欧佩克" in t or "石油" in t or "原油" in t):
-            return ("🔴 利空","产油国减产→供应收紧→油价可能上行→增加航空成本","#e74c3c")
-        if "增产" in t and ("石油" in t or "原油" in t):
-            return ("🟢 利好","产油国增产→供应增加→油价可能下行→降低航空成本","#27ae60")
-        # 美伊/中东
-        if ("制裁" in t or "冲突" in t or "紧张" in t or "升级" in t) and ("伊朗" in t or "中东" in t or "波斯湾" in t):
-            return ("🔴 利空","中东局势紧张→原油供应风险→油价上行压力→航空成本预期上升","#e74c3c")
-        if ("协议" in t or "缓和" in t or "解除" in t) and ("伊朗" in t or "中东" in t):
-            return ("🟢 利好","中东局势缓和→原油供应风险降低→油价预期稳定→成本端利好","#27ae60")
-        if "伊朗" in t or "中东" in t or "波斯湾" in t or "霍尔木兹" in t:
-            return ("🟠 关注","中东地缘政治影响原油供应→油价波动直接关系到国航燃油成本","#e67e22")
-        # 汇率
-        if "人民币升" in t or "人民币走强" in t:
-            return ("🟢 利好","人民币升值→国航以人民币计价的国际航线收入增加→利润受益","#27ae60")
-        if "人民币贬" in t or "人民币走弱" in t:
-            return ("🔴 利空","人民币贬值→国际航线收入折算缩水→以外币结算的成本上升","#e74c3c")
-        if "美联储降息" in t or "降息" in t:
-            return ("🟢 利好","降息→美元走弱→人民币相对升值→利好国航国际业务","#27ae60")
-        if "美联储加息" in t:
-            return ("🔴 利空","加息→美元走强→人民币贬值压力→利空国航国际收入","#e74c3c")
-        # 航空行业
-        if ("航班" in t or "航线" in t or "开通" in t) and ("增" in t or "恢复" in t or "新开" in t):
-            return ("🟢 利好","航线增加/恢复→国航运力扩张→收入增长预期","#27ae60")
-        if "停飞" in t or "取消航班" in t or "关闭领空" in t:
-            return ("🔴 利空","航班运营受阻→国航收入直接受损","#e74c3c")
-        if "免签" in t or "签证" in t:
-            return ("🟢 利好","签证便利→出境游增加→国际航线客流上升→利好国航","#27ae60")
-        if "旅游" in t and ("复苏" in t or "增长" in t or "热" in t or "新高" in t):
-            return ("🟢 利好","旅游市场繁荣→出行需求旺盛→机票销量增加→国航直接受益","#27ae60")
-        if "事故" in t or "坠" in t:
-            return ("🔴 利空","航空安全事故→行业信心受挫→短期内航空股承压","#e74c3c")
-        # 贸易/关税
-        if ("关税" in t or "贸易" in t) and ("加" in t or "升级" in t or "新增" in t or "提出对" in t) and not ("续期" in t or "延长" in t or "缓和" in t or "协议" in t):
-            return ("🔴 利空","贸易摩擦升级→影响全球经济→商务出行需求下降→不利航空","#e74c3c")
-        if ("关税" in t or "贸易" in t) and ("缓和" in t or "协议" in t or "谈判" in t or "续期" in t or "延长" in t or "解除" in t):
-            return ("🟢 利好","贸易关系改善→经济信心增强→商务及旅游出行增加","#27ae60")
-        # 大盘
-        if "暴涨" in t or "大涨" in t:
-            return ("🟢 利好","市场情绪高涨→资金风险偏好上升→有利于航空股估值提升","#27ae60")
-        if "暴跌" in t or "崩盘" in t or "恐慌" in t:
-            return ("🔴 利空","市场恐慌→系统性风险→航空股可能被错杀","#e74c3c")
-        if "新高" in t or "突破" in t:
-            return ("🔵 偏多","市场走强→整体氛围向好","#3498db")
-        # 国际局势
-        if "战争" in t or "冲突" in t or "威胁" in t:
-            return ("🔴 利空","地缘冲突→全球不稳定→出行意愿下降+油价风险","#e74c3c")
-        # 默认 - 只对真正相关的留tag
-        if any(k in t for k in ["特朗普","关 税","人民币","汇率"]):
-            if "行政令" in t or "AI" in t or "税务" in t: return ("","","")
-        if any(k in t for k in ["美伊","美 伊","伊朗 制裁","中东 局势","霍尔木兹","原油 供应","OPEC 减产","人民币 汇","关税 加"]):
-            return ("🟠 关注","涉及影响国航的关键变量，需持续跟踪","#e67e22")
-        return ("","","")
-    def impact_tag(text):
-        tag, detail, color = analyze_news(text)
-        return tag, detail, color
-
-    news_html = ""
+    news_h = ""
     for cat,items in news.items():
         if not items: continue
-        news_html+=f'<div class="card"><h3>{cat}</h3>'
+        news_h += f'<div class="card"><h3>{cat}</h3>'
         for n in items[:4]:
-            _, detail, tc = impact_tag(n)
+            tag, detail, tc = analyze_one(n)
             if detail:
-                news_html+=f'<div class="news-item">▸ {n}<br><span style="font-size:10px;color:{tc};background:{tc}11;padding:1px 6px;border-radius:3px;display:inline-block;margin-top:2px">{detail}</span></div>'
+                news_h += f'<div class="news">▸ {n}<br><span class="tag" style="background:{tc}18;color:{tc};border:1px solid {tc}44">{detail}</span></div>'
             else:
-                news_html+=f'<div class="news-item">▸ {n}</div>'
-        news_html+='</div>'
+                news_h += f'<div class="news">▸ {n}</div>'
+        news_h += '</div>'
 
-    ft = '<div class="footer">⚠️ 仅供参考 · 每天9:00/20:00推送<br>油价决定成本 · 汇率决定收入 · 局势决定风险</div>'
+    ft = '<div class="ft">⚠️ 仅供参考 · 腾讯云24h运行<br>油价决定成本 · 汇率决定收入 · 局势决定风险</div>'
 
-    return f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>{css}</style></head><body>{hdr}{ac_html}{v_html}{drv_html}{idx_html}{news_html}{ft}</body></html>'
+    return f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>{css}</style></head><body>{hdr}{ac_html}{v_html}{drv}{idx_h}{news_h}{ft}</body></html>'
 
 def main():
     print("⏳ 采集...")
     ac = get_airchina(); print(f"  国航: {'OK' if ac else 'N/A'}")
-    oil_fx = get_oil_fx_gold(); print(f"  命门: {list(oil_fx.keys())}")
-    idx = get_index(); print(f"  指数: {list(idx.keys())}")
-    up,down,lu,ld = get_breadth(); print(f"  涨跌: {up}/{down}")
-    north = get_north(); print(f"  北向: {north}")
+    oil = get_oil_fx(); print(f"  驱动: {list(oil.keys())}")
+    idx = get_index(); print(f"  指数: {len(idx)}项")
     items = get_news(); print(f"  新闻: {len(items)}条")
-    news = filter_for_airchina(items)
-    for k,v in news.items(): print(f"    {k}: {len(v)}")
-
-    neg,pos,neu = analyze(ac, oil_fx, idx, up,down,lu,ld, north, news)
-    html = build(ac, oil_fx, idx, up,down,lu,ld, north, news, neg,pos,neu)
+    news = classify(items)
+    for k,v in news.items():
+        tagged = sum(1 for n in v if analyze_one(n)[0])
+        print(f"    {k}: {len(v)}条 (含分析{tagged})")
+    neg, pos, neu = analyze(ac, oil, idx, news)
+    html = build(ac, oil, idx, news, neg, pos, neu)
     now = datetime.now(BEIJING_TZ)
-    emoji = "🌅" if now.hour<12 else "🌙"
-    push(f"{emoji} 国航 · {now.strftime('%m/%d %H:%M')}", html)
+    emoji = "🌅" if now.hour < 12 else "🌙"
+    push(f"{emoji} 国航盯盘 · {now.strftime('%m/%d %H:%M')}", html)
 
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
