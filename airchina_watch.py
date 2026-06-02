@@ -174,23 +174,24 @@ def build(ac, oil, idx, news, neg, pos, neu):
     emoji = "🌅" if now.hour < 12 else "🌙"
     v_text, vc = verdict(neg, pos, ac)
 
-    css = """*{margin:0;padding:0}body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#0d1117;color:#e0e0e0;padding:8px;font-size:13px}
-.hd{text-align:center;padding:10px;background:linear-gradient(180deg,#1a1f2e,#161b22);border-radius:10px;margin-bottom:6px}
-.hd h1{font-size:15px;color:#f0f6fc}.hd .t{font-size:10px;color:#666}
-.ac{background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:10px;padding:12px;margin-bottom:6px;text-align:center;border:2px solid #21262d}
-.ac .n{font-size:12px;color:#8b949e}.ac .p{font-size:26px;font-weight:800;margin:2px 0}.ac .c{font-size:13px;font-weight:600}
-.ac .d{display:flex;justify-content:center;gap:14px;margin-top:4px;font-size:10px;color:#666}
-.up{color:#e94560}.down{color:#0f9}
-.ve{text-align:center;padding:8px;margin-bottom:6px;border-radius:8px;font-size:13px;font-weight:700}
-.ve .rs{font-size:10px;margin-top:3px;font-weight:400;opacity:.85}
-.card{background:#161b22;border-radius:8px;padding:10px;margin-bottom:5px;border:1px solid #21262d}
-.card h3{font-size:12px;color:#f0f6fc;margin-bottom:5px}
-.row{display:flex;justify-content:space-between;align-items:center;padding:2px 0;font-size:12px}
-.row .l{color:#8b949e}.row .r{text-align:right;font-weight:600}
-.news{font-size:11px;padding:3px 0;border-bottom:1px solid #21262d33;line-height:1.5;color:#b0b0c0}
+    css = """*{margin:0;padding:0}body{font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:#f5f6f8;color:#2c3e50;padding:12px;font-size:14px}
+.hd{text-align:center;padding:16px 0 12px;margin-bottom:10px}
+.hd h1{font-size:17px;color:#1a1a2e;font-weight:700}.hd .t{font-size:11px;color:#95a5a6;margin-top:3px}
+.ac{background:#fff;border-radius:10px;padding:16px;margin-bottom:10px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06)}
+.ac .n{font-size:12px;color:#95a5a6;letter-spacing:1px}.ac .p{font-size:32px;font-weight:700;margin:4px 0;color:#1a1a2e}.ac .c{font-size:14px;font-weight:600}
+.ac .d{display:flex;justify-content:center;gap:16px;margin-top:6px;font-size:11px;color:#b0b0b0}
+.ac .d span{background:#f8f9fa;padding:2px 8px;border-radius:4px}
+.up{color:#e74c3c}.down{color:#27ae60}
+.ve{text-align:center;padding:10px 14px;margin-bottom:10px;border-radius:8px;font-size:14px;font-weight:600;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+.ve .rs{font-size:11px;margin-top:3px;font-weight:400;opacity:.75}
+.card{background:#fff;border-radius:8px;padding:14px;margin-bottom:8px;box-shadow:0 1px 3px rgba(0,0,0,0.04)}
+.card h3{font-size:13px;color:#1a1a2e;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #eee;font-weight:600}
+.row{display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px}
+.row .l{color:#7f8c8d}.row .r{text-align:right;font-weight:500;color:#2c3e50}
+.news{font-size:12px;padding:5px 0;border-bottom:1px solid #f0f0f0;line-height:1.6;color:#444}
 .news:last-child{border-bottom:none}
-.tag{font-size:9px;padding:1px 5px;border-radius:3px;margin-top:2px;display:inline-block}
-.ft{text-align:center;font-size:10px;color:#484f58;padding:10px}"""
+.tag{font-size:10px;padding:2px 8px;border-radius:4px;margin-top:3px;display:inline-block;line-height:1.5}
+.ft{text-align:center;font-size:11px;color:#bdc3c7;padding:12px;line-height:1.6}"""
 
     hdr = f'<div class="hd"><h1>✈️ 国航盯盘</h1><div class="t">{ds} 北京 · 每天9:00/20:00自动推送</div></div>'
 
